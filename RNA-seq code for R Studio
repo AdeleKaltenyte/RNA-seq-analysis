@@ -1,0 +1,125 @@
+library(seqinr)
+library(stringr)
+library(DESeq2)
+library(pheatmap)
+
+
+rm(list=ls())
+
+parentDir="path_to_RNA-seq_data"
+
+
+DIRS=dir(parentDir, pattern = "^DTU*")[-7]
+
+folder=DIRS[1]
+filePath=paste(parentDir,"/", folder, "/", "abundance.tsv", sep="")
+ALL0=read.table(filePath, header=T)
+
+ALL=ALL0[,c(1,4)]
+
+
+
+for(folder in DIRS[-1]) {
+  
+  filePath=paste(parentDir,"/", folder, "/", "abundance.tsv", sep="")
+  TEMP=read.table(filePath, header=T)
+  
+  ALL=cbind(ALL, TEMP[,4])
+  
+}
+
+colnames(ALL)[-1]=DIRS
+
+CDS=read.fasta(paste(parentDir,"/genomes/","DTU_9.1_CDS.fna",sep="" ), whole.header = T)
+
+grep(pattern = "FADH2-dependent halogenase PltA", names(CDS), value=T)
+
+
+
+geneNames=names(CDS)
+
+geneDF=str_split_fixed(geneNames, pattern = " \\[", n = 2)
+geneDF2=str_split_fixed(geneDF[,2], pattern = "protein=", n = 5)
+geneDF3=str_split_fixed(geneDF2[,2], pattern = "] \\[", n = 5)
+
+geneLUT=data.frame(geneDF[,1], geneDF3[,1], ALL$target_id)
+
+
+ALL$target_id=geneLUT$geneDF3...1.
+
+ALL$target_id=make.unique(ALL$target_id)
+
+#sort(table(ALL$target_id), decreasing = T)
+
+
+##if (!require("BiocManager", quietly = TRUE))
+##  install.packages("BiocManager")
+
+##BiocManager::install("DESeq2")
+
+#turn into a DESeq2 object
+
+
+#colnames(ALL)[c(seq(2,9))]
+
+#which(is.na(ALL))
+ALL[,-1]=round(ALL[,-1])
+
+Samples <- data.frame(conditions = factor(c("con","con","con","con","treat","treat","treat" )))
+
+
+
+#rownames(Samples) <- colnames(ALL)[c(seq(2,9))]
+
+
+dds_dat <- DESeqDataSetFromMatrix(countData=ALL, 
+                                  colData=Samples, 
+                                  design=~conditions, tidy = TRUE)
+
+
+
+#Run the DESeq analysis
+dds <- DESeq(dds_dat)
+
+#####
+#3) Multivariate 
+#####
+
+plot(0,0, col=0,xaxt='n',yaxt='n',frame.plot=F, xlab="",ylab="", ann=F)
+text(0,0,"Multivariate", cex=3, xaxt='n')
+
+#a heatmap
+pheatmap(log10(counts(dds, normalized=T)+1), labels_row = "")
+
+#make PCA using transformed reads
+#Transformation is basically a log of normalized counts, i think
+vsdata <- vst(dds, blind=FALSE)
+plotPCA(vsdata, intgroup="conditions")
+
+
+plotCounts(dds, gene="FADH2-dependent halogenase PltA",     intgroup="conditions", pch=16)
+
+RES=results(object = dds,contrast = c("conditions", "treat","con"))
+
+
+RES_sigSort=RES[order(RES$padj),]
+
+RES_big_sig=subset(RES_sigSort, padj<.05 & abs(log2FoldChange)>1.5)
+
+data.frame(RES_big_sig)
+
+getwd()
+write.table(data.frame(RES_big_sig), file = "DTUwt_with_without_F8.txt" )
+
+#plot all points, log2fold vs -log10(pvalues)
+with(RES, plot(log2FoldChange, -log10(pvalue), pch=20, main="Volcano plot" ))
+#arrows(x0 = 7,x1 = 8,y0 = 40,y1 = 40,length = .1)
+#text(7.5,50, "tdaB, lfc>16")
+#make all significant points blue
+with(subset(RES, padj<.05 ), points(log2FoldChange, -log10(pvalue), pch=20, col="blue"))
+#make all signifcant AND at least 2-fold differential red
+with(subset(RES, padj<.05 & abs(log2FoldChange)>1.5), points(log2FoldChange, -log10(pvalue), pch=20, col="red"))
+
+
+legend("topleft",legend = c( "p<0.05","lfc>2", "not significant"), pt.bg = c("blue", "red", "black"), pch=21)
+
